@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -128,8 +129,10 @@ class OrderbookTests(unittest.TestCase):
 
         yes_asks = finder.asks_for_side(book, "yes")
         no_asks = finder.asks_for_side(book, "no")
+        yes_bids = finder.bids_for_side(book, "yes")
         self.assertEqual(yes_asks[0], finder.PriceLevel(D("0.4400"), D("2.50")))
         self.assertEqual(no_asks[0], finder.PriceLevel(D("0.5800"), D("13.00")))
+        self.assertEqual(yes_bids[0], finder.PriceLevel(D("0.4200"), D("13.00")))
 
         fill = finder.fill_levels(yes_asks, D("4.00"))
         self.assertIsNotNone(fill)
@@ -192,6 +195,13 @@ class FeeTests(unittest.TestCase):
             (finder.FilledLevel(price=D("0.3301"), quantity=D("0.03")),)
         )
         self.assertEqual(fee, D("0.000465"))
+
+    def test_limit_order_fee_is_one_quarter_of_taker_rate(self) -> None:
+        model = finder.FeeModel("quadratic", D("1"))
+        fill = (finder.FilledLevel(price=D("0.40"), quantity=D("1")),)
+
+        self.assertEqual(model.taker_fee(fill), D("0.016800"))
+        self.assertEqual(model.limit_fee(fill), D("0.004200"))
 
 
 class ParticipantMatchingTests(unittest.TestCase):
@@ -596,6 +606,51 @@ class FakeHttpClient:
 
 
 class ClientAndSerializationTests(unittest.TestCase):
+    def test_odds_snapshot_cache_reuses_identical_request(self) -> None:
+        http = FakeHttpClient(
+            [finder.JsonResponse([], {"x-requests-remaining": "99"})]
+        )
+        cache = finder.OddsResponseCache(ttl_seconds=300)
+        client = finder.OddsApiClient(  # type: ignore[arg-type]
+            http, "secret", cache=cache
+        )
+        request = {
+            "regions": ("us",),
+            "bookmakers": (),
+            "markets": ("h2h",),
+            "commence_from": START,
+            "commence_to": START + timedelta(hours=24),
+        }
+
+        _, first_quota = client.get_odds("americanfootball_ncaaf", **request)
+        shifted_request = {
+            **request,
+            "commence_from": START + timedelta(minutes=1),
+            "commence_to": START + timedelta(hours=24, minutes=1),
+        }
+        _, second_quota = client.get_odds(
+            "americanfootball_ncaaf", **shifted_request
+        )
+
+        self.assertEqual(len(http.calls), 1)
+        self.assertNotIn("x-snapshot-cache", first_quota)
+        self.assertEqual(second_quota["x-snapshot-cache"], "reused")
+
+    def test_market_snapshot_cache_reuses_kalshi_request(self) -> None:
+        http = FakeHttpClient(
+            [finder.JsonResponse({"orderbook_fp": {}}, {})]
+        )
+        cache = finder.OddsResponseCache(ttl_seconds=300)
+        client = finder.KalshiApiClient(  # type: ignore[arg-type]
+            http, cache=cache
+        )
+
+        first = client.get_orderbook("KX-MARKET")
+        second = client.get_orderbook("KX-MARKET")
+
+        self.assertEqual(first, second)
+        self.assertEqual(len(http.calls), 1)
+
     def test_dynamic_tennis_and_preseason_sport_resolution(self) -> None:
         class MetadataClient:
             @staticmethod
@@ -654,6 +709,7 @@ class ClientAndSerializationTests(unittest.TestCase):
             fractional=False,
             tie_settlement=None,
             fee_model=finder.FeeModel("quadratic", D("0")),
+            bids=(finder.PriceLevel(D("0.54"), D("73")),),
         )
         candidate = build_candidate(match, (route,), tie_possible=False)
         self.assertIsNotNone(candidate)
@@ -698,6 +754,40 @@ class ClientAndSerializationTests(unittest.TestCase):
         )
         self.assertEqual(kalshi_leg["market_ticker"], "KXGAME-BETA")
         self.assertEqual(kalshi_leg["side"], "YES")
+        self.assertEqual(kalshi_leg["current_price"], "0.55")
+        self.assertEqual(kalshi_leg["current_price_volume"], "200")
+        self.assertEqual(
+            kalshi_leg["current_price_implied_probability"], "0.55"
+        )
+        self.assertEqual(kalshi_leg["one_cent_lower_bid_price"], "0.54")
+        self.assertEqual(kalshi_leg["one_cent_lower_bid_volume"], "73")
+        self.assertEqual(
+            kalshi_leg["one_cent_lower_bid_implied_probability"], "0.54"
+        )
+        self.assertEqual(
+            decoded["opportunities"][0]["event"]["kalshi_url"],
+            "https://kalshi.com/markets/kxncaafgame/"
+            "beta-at-alpha-winner/kxgame",
+        )
+
+    def test_candidates_sort_by_signed_vig(self) -> None:
+        match = matched_two_team_event(
+            home_offers=(sportsbook_offer("Alpha Wolves", "2.00"),),
+            away_offers=(sportsbook_offer("Beta Bears", "2.00"),),
+        )
+        candidate = build_candidate(match, (), tie_possible=False)
+        self.assertIsNotNone(candidate)
+        positive = replace(candidate, vig=D("0.01"))
+        negative = replace(candidate, vig=D("-0.02"))
+        zero = replace(candidate, vig=D("0"))
+
+        ordered = sorted(
+            (positive, negative, zero), key=finder.candidate_sort_key
+        )
+        self.assertEqual(
+            [item.vig for item in ordered],
+            [D("-0.02"), D("0"), D("0.01")],
+        )
 
 
 if __name__ == "__main__":

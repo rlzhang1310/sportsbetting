@@ -43,9 +43,16 @@ class UiConfigTests(unittest.TestCase):
 
     def test_ui_page_does_not_embed_an_api_key_field(self) -> None:
         self.assertNotIn("THE_ODDS_API_KEY", ui.PAGE)
-        self.assertIn("Find close odds", ui.PAGE)
+        self.assertIn("Load market snapshot", ui.PAGE)
+        self.assertIn("Apply filters", ui.PAGE)
         self.assertIn("American", ui.PAGE)
         self.assertIn("Similar books within 1pp", ui.PAGE)
+        self.assertIn("Kalshi order book", ui.PAGE)
+        self.assertIn("Bid (1¢ lower)", ui.PAGE)
+        self.assertIn("implied with taker fee", ui.PAGE)
+        self.assertIn("implied with maker fee", ui.PAGE)
+        self.assertIn("Open on Kalshi", ui.PAGE)
+        self.assertIn('target="_blank" rel="noopener noreferrer"', ui.PAGE)
 
     def test_bookmaker_control_is_a_multi_select_dropdown(self) -> None:
         self.assertIn('class="multi" id="bookmakerMenu"', ui.PAGE)
@@ -56,6 +63,27 @@ class UiConfigTests(unittest.TestCase):
             'class="bookmaker" type="checkbox" value="fanduel"', ui.PAGE
         )
         self.assertIn("selectedBookmakers()", ui.PAGE)
+
+    def test_scope_filters_come_before_disabled_analysis_filters(self) -> None:
+        self.assertIn('id="scopePanel"', ui.PAGE)
+        self.assertIn('id="analysisFilters" disabled', ui.PAGE)
+        self.assertIn('id="continue"', ui.PAGE)
+        self.assertLess(ui.PAGE.index('id="sport"'), ui.PAGE.index('id="maxVig"'))
+        self.assertLess(ui.PAGE.index('id="regions"'), ui.PAGE.index('id="maxVig"'))
+        self.assertLess(
+            ui.PAGE.index('id="bookmakerMenu"'), ui.PAGE.index('id="maxVig"')
+        )
+        self.assertLess(
+            ui.PAGE.index('class="scope-market"'), ui.PAGE.index('id="maxVig"')
+        )
+        self.assertLess(ui.PAGE.index('id="hours"'), ui.PAGE.index('id="maxVig"'))
+        self.assertLess(ui.PAGE.index('id="live"'), ui.PAGE.index('id="maxVig"'))
+        self.assertLess(ui.PAGE.index('id="kalshi"'), ui.PAGE.index('id="maxVig"'))
+        self.assertGreater(ui.PAGE.index('id="payout"'), ui.PAGE.index('id="maxVig"'))
+        self.assertIn('class="filter-market"', ui.PAGE)
+        self.assertIn('id="filterKalshi"', ui.PAGE)
+        self.assertIn("refresh_prices:refreshPrices||loadScope", ui.PAGE)
+        self.assertIn('id="refresh"', ui.PAGE)
 
 
 if __name__ == "__main__":

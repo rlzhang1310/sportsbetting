@@ -14,6 +14,9 @@ from typing import Any
 import arbitrage_finder as finder
 
 
+ODDS_CACHE = finder.OddsResponseCache(ttl_seconds=float("inf"))
+
+
 PAGE = r"""<!doctype html>
 <html lang="en">
 <head>
@@ -31,6 +34,9 @@ h1 { margin:0; font:700 clamp(30px,5vw,52px)/1.05 Georgia,serif; letter-spacing:
 .panel,.result { background:var(--card); border:1px solid var(--line); border-radius:16px;
   box-shadow:0 8px 28px #17212b0d; }
 .panel { padding:20px; margin:24px 0; }
+.panel legend { padding:0 8px; font-weight:800; color:var(--accent); }
+.panel[disabled] { opacity:.5; }
+.step-note { color:var(--muted); margin:0 0 14px; }
 .grid { display:grid; grid-template-columns:repeat(4,minmax(150px,1fr)); gap:15px; }
 label { display:block; font-weight:650; }
 label span { display:block; color:var(--muted); font-size:12px; font-weight:500; margin-top:2px; }
@@ -56,6 +62,8 @@ input,select { width:100%; margin-top:6px; padding:10px 11px; border:1px solid v
 button { margin-top:20px; border:0; border-radius:10px; padding:12px 20px; color:white;
   background:var(--accent); font:700 15px system-ui; cursor:pointer; }
 button:disabled { opacity:.55; cursor:wait; }
+.actions { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+.secondary { color:var(--accent); background:var(--accent2); border:1px solid #a9d3c5; }
 #status { color:var(--muted); margin:16px 2px; min-height:22px; }
 .summary { display:flex; gap:10px; flex-wrap:wrap; margin:14px 0; }
 .pill { border:1px solid var(--line); background:var(--card); padding:7px 11px; border-radius:999px; }
@@ -63,6 +71,8 @@ button:disabled { opacity:.55; cursor:wait; }
 .result-head { display:flex; justify-content:space-between; gap:20px; align-items:flex-start; }
 .match { font:700 20px/1.2 Georgia,serif; }
 .time { color:var(--muted); font-size:13px; margin-top:4px; }
+.kalshi-link { color:var(--accent); font-weight:700; text-decoration:none; }
+.kalshi-link:hover { text-decoration:underline; }
 .score { min-width:145px; text-align:right; }
 .gap { color:var(--accent); font-size:24px; font-weight:800; }
 .metrics { color:var(--muted); font-size:13px; }
@@ -85,12 +95,12 @@ details { color:var(--muted); margin-top:18px; }
 <h1>Promo Odds Finder</h1>
 <p class="intro">Find opposing moneyline legs whose implied probabilities land closest to 100%.
 Lower-probability legs are highlighted as natural promo-bet candidates. Kalshi prices include visible depth and modeled taker fees.</p>
-<section class="panel">
+<section class="panel" id="scopePanel">
+  <div class="tag">Step 1</div>
+  <h2>Choose sportsbook scope</h2>
+  <p class="step-note">These settings determine which sportsbook data the API must fetch. Changing any of them starts a new snapshot.</p>
   <div class="grid">
     <label>Sport<select id="sport">SPORT_OPTIONS</select></label>
-    <label>Maximum vig gap (%)<span>Distance from a 100% implied sum</span><input id="maxVig" type="number" value="5" min="0" step="0.1"></label>
-    <label>Maximum low-leg probability (%)<span>Use 100 to show every pair</span><input id="maxLow" type="number" value="100" min="0" max="100" step="1"></label>
-    <label>Upcoming hours<input id="hours" type="number" value="168" min="1" step="1"></label>
     <label>Regions<input id="regions" value="us,us2"></label>
     <div><div class="field-title">Bookmakers<span>Select any number of books</span></div>
       <details class="multi" id="bookmakerMenu"><summary id="bookmakerSummary">All bookmakers</summary>
@@ -114,27 +124,50 @@ Lower-probability legs are highlighted as natural promo-bet candidates. Kalshi p
         </div>
       </details>
     </div>
+    <label>Upcoming hours<input id="hours" type="number" value="168" min="1" step="1"></label>
+  </div>
+  <div class="checks">
+    <strong>Markets:</strong>
+    <label><input class="scope-market" type="checkbox" value="h2h" checked> Moneyline</label>
+    <label id="spreadMarketLabel"><input id="spreadMarket" class="scope-market" type="checkbox" value="spreads"> Spreads</label>
+    <label id="totalMarketLabel"><input id="totalMarket" class="scope-market" type="checkbox" value="totals"> Totals</label>
+    <label id="tdMarketLabel"><input id="tdMarket" class="scope-market" type="checkbox" value="player_anytime_td"> NFL anytime TD</label>
+  </div>
+  <div class="checks">
+    <label><input id="kalshi" type="checkbox" checked> Include Kalshi</label>
+    <label><input id="live" type="checkbox"> Include recently started games</label>
+  </div>
+  <button id="continue" type="button">Load market snapshot</button>
+</section>
+<fieldset class="panel" id="analysisFilters" disabled>
+  <legend>Step 2 · Analysis filters</legend>
+  <p class="step-note">These controls reanalyze the loaded snapshot without contacting the external APIs. Refresh only when you need new prices.</p>
+  <div class="grid">
+    <label>Maximum vig gap (%)<span>Distance from a 100% implied sum</span><input id="maxVig" type="number" value="5" min="0" step="0.1"></label>
+    <label>Maximum low-leg probability (%)<span>Use 100 to show every pair</span><input id="maxLow" type="number" value="100" min="0" max="100" step="1"></label>
     <label>Pricing payout ($)<span>Used for Kalshi depth and fees</span><input id="payout" type="number" value="100" min="1" step="1"></label>
     <label>Near misses<input id="nearMisses" type="number" value="5" min="0" max="50" step="1"></label>
   </div>
   <div class="checks">
-    <strong>Markets:</strong>
-    <label><input class="market" type="checkbox" value="h2h" checked> Moneyline</label>
-    <label id="spreadMarketLabel"><input id="spreadMarket" class="market" type="checkbox" value="spreads"> Spreads</label>
-    <label id="totalMarketLabel"><input id="totalMarket" class="market" type="checkbox" value="totals"> Totals</label>
-    <label id="tdMarketLabel"><input id="tdMarket" class="market" type="checkbox" value="player_anytime_td"> NFL anytime TD</label>
+    <strong>Show markets:</strong>
+    <label><input class="filter-market" type="checkbox" value="h2h" checked> Moneyline</label>
+    <label><input class="filter-market" type="checkbox" value="spreads"> Spreads</label>
+    <label><input class="filter-market" type="checkbox" value="totals"> Totals</label>
+    <label><input class="filter-market" type="checkbox" value="player_anytime_td"> NFL anytime TD</label>
   </div>
   <div class="checks">
-    <label><input id="kalshi" type="checkbox" checked> Include Kalshi</label>
+    <label><input id="filterKalshi" type="checkbox" checked> Include Kalshi</label>
     <label><input id="requireKalshi" type="checkbox"> Require a Kalshi leg</label>
-    <label><input id="live" type="checkbox"> Include recently started games</label>
   </div>
-  <button id="find">Find close odds</button>
-</section>
+  <div class="actions">
+    <button id="find" type="button">Apply filters</button>
+    <button id="refresh" class="secondary" type="button">Refresh prices</button>
+  </div>
+</fieldset>
 <div id="status"></div><div id="results"></div>
 </main>
 <script>
-const $=id=>document.getElementById(id), pct=x=>(Number(x)*100).toFixed(2)+'%';
+const $=id=>document.getElementById(id), pct=x=>(Number(x)*100).toFixed(2)+'%', price=x=>'$'+Number(x).toFixed(2), volume=x=>Number(x).toLocaleString(undefined,{maximumFractionDigits:2});
 const h=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function legText(leg){
   if(leg.source_type==='kalshi') return `BUY ${h(leg.side)} · ${h(leg.market_ticker)} · avg $${h(leg.average_price)} · fee $${h(leg.fee)}`;
@@ -142,17 +175,20 @@ function legText(leg){
 }
 function renderCandidate(c, rejected=false){
   const e=c.event, low=Number(c.low_probability);
+  const kalshiLink=e.kalshi_url?` · <a class="kalshi-link" href="${h(e.kalshi_url)}" target="_blank" rel="noopener noreferrer">Open on Kalshi ↗</a>`:'';
   const legs=c.legs.map(l=>{const p=Number(c.implied_probabilities[l.selection]);
     const nearby=(l.similar_sportsbooks||[]).map(x=>`${h(x.venue)} <strong>${h(x.american_odds)}</strong>`).join(' · ');
+    const kalshiDepth=l.source_type==='kalshi'&&l.current_price!=null?`<div class="alternatives"><strong>Kalshi order book</strong><br>Current ask <strong>${price(l.current_price)}</strong> · ${pct(l.current_price_implied_probability)} implied with taker fee · volume ${volume(l.current_price_volume)}<br>Bid (1¢ lower) <strong>${price(l.one_cent_lower_bid_price)}</strong> · ${pct(l.one_cent_lower_bid_implied_probability)} implied with maker fee · volume ${volume(l.one_cent_lower_bid_volume)}</div>`:'';
     return `
     <div class="leg ${Math.abs(p-low)<1e-10?'low':''}">
       ${Math.abs(p-low)<1e-10?'<div class="tag">Lower-probability leg</div>':''}
       <div class="selection">${h(l.selection)}</div><div class="venue">${h(l.venue)}</div>
       <div class="prob">${pct(p)} implied</div><div class="execution">${legText(l)}</div>
+      ${kalshiDepth}
       ${nearby?`<div class="alternatives"><strong>Similar books within 1pp</strong><br>${nearby}</div>`:''}
     </div>`}).join('');
   return `<article class="result"><div class="result-head"><div><div class="tag">${h(e.market_label)}</div><div class="match">${h(e.away_team)} at ${h(e.home_team)}</div>
-    <div class="time">${h(new Date(e.commence_time).toLocaleString())}${e.kalshi_event_ticker?' · '+h(e.kalshi_event_ticker):''}</div></div>
+    <div class="time">${h(new Date(e.commence_time).toLocaleString())}${e.kalshi_event_ticker?' · '+h(e.kalshi_event_ticker):''}${kalshiLink}</div></div>
     <div class="score"><div class="gap">${pct(c.vig)} vig</div><div class="metrics">sum ${pct(c.implied_probability_sum)} · distance ${pct(c.vig_gap)}</div></div></div>
     <div class="legs">${legs}</div>${rejected?`<div class="metrics" style="margin-top:9px">Filtered: ${h(c.rejection_reason)}</div>`:''}</article>`;
 }
@@ -168,26 +204,54 @@ function syncBookmakers(source){
   const selected=books.filter(x=>x.checked);
   $('bookmakerSummary').textContent=all.checked?'All bookmakers':`${selected.length} bookmaker${selected.length===1?'':'s'} selected`;
 }
-async function run(){
-  const button=$('find'); button.disabled=true; $('status').textContent='Loading current prices…'; $('results').innerHTML='';
+function syncAnalysisScope(){
+  const loadedMarkets=new Set([...document.querySelectorAll('.scope-market:checked')].map(x=>x.value));
+  document.querySelectorAll('.filter-market').forEach(x=>{x.disabled=!loadedMarkets.has(x.value);x.checked=loadedMarkets.has(x.value)});
+  $('filterKalshi').disabled=!$('kalshi').checked;
+  $('filterKalshi').checked=$('kalshi').checked;
+  $('requireKalshi').disabled=!$('kalshi').checked;
+  if(!$('kalshi').checked)$('requireKalshi').checked=false;
+}
+function unlockAnalysis(){
+  $('analysisFilters').disabled=false;
+  $('analysisFilters').scrollIntoView({behavior:'smooth',block:'start'});
+}
+function lockAnalysis(){
+  $('analysisFilters').disabled=true;
+  $('results').innerHTML='';
+  $('status').textContent='Scope changed. Continue to analysis filters when ready.';
+}
+function renderResults(data){
+  const shownMarkets=new Set([...document.querySelectorAll('.filter-market:checked')].map(x=>x.value));
+  const showCandidate=c=>shownMarkets.has(c.event.market_key)&&($('filterKalshi').checked||!c.uses_kalshi);
+  const opportunities=data.opportunities.filter(showCandidate), nearMisses=(data.near_misses||[]).filter(showCandidate);
+  const c=data.counts, quota=data.quota||{};
+  $('status').innerHTML=`<div class="summary"><span class="pill">${opportunities.length} close pairs</span><span class="pill">${c.odds_events} sportsbook markets loaded</span><span class="pill">${c.matched_events} Kalshi matches</span>${quota['x-snapshot-cache']==='reused'?'<span class="pill">Market snapshot reused</span>':''}${quota['x-requests-remaining']?`<span class="pill">${h(quota['x-requests-remaining'])} API requests left</span>`:''}</div>`;
+  let html=opportunities.map(c=>renderCandidate(c)).join('');
+  if(!html) html='<div class="panel">No pairs meet the current filters. Try increasing the maximum vig gap or low-leg probability.</div>';
+  if(nearMisses.length) html+=`<details><summary>Show ${nearMisses.length} closest filtered pairs</summary>${nearMisses.map(c=>renderCandidate(c,true)).join('')}</details>`;
+  $('results').innerHTML=html;
+}
+async function run(refreshPrices=false, loadScope=false){
+  const buttons=[$('continue'),$('find'),$('refresh')]; buttons.forEach(x=>x.disabled=true); $('status').textContent=refreshPrices?'Refreshing current prices…':'Loading market snapshot…'; $('results').innerHTML='';
   const body={sport:$('sport').value,max_vig:Number($('maxVig').value),max_low_probability:Number($('maxLow').value),
     hours_ahead:Number($('hours').value),regions:$('regions').value,bookmakers:selectedBookmakers(),payout:Number($('payout').value),
-    markets:[...document.querySelectorAll('.market:checked')].map(x=>x.value),
-    include_kalshi:$('kalshi').checked,require_kalshi:$('requireKalshi').checked,include_live:$('live').checked,
-    near_misses:Number($('nearMisses').value)};
+    markets:[...document.querySelectorAll('.scope-market:checked')].map(x=>x.value),
+    include_kalshi:loadScope?$('kalshi').checked:$('filterKalshi').checked,require_kalshi:loadScope?false:$('requireKalshi').checked,include_live:$('live').checked,
+    near_misses:Number($('nearMisses').value),refresh_prices:refreshPrices||loadScope};
   try { const response=await fetch('/api/find',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     const data=await response.json(); if(!response.ok) throw new Error(data.error||'Request failed');
-    const c=data.counts, quota=data.quota||{};
-    $('status').innerHTML=`<div class="summary"><span class="pill">${c.opportunities} close pairs</span><span class="pill">${c.odds_events} sportsbook markets</span><span class="pill">${c.matched_events} Kalshi matches</span>${quota['x-requests-remaining']?`<span class="pill">${h(quota['x-requests-remaining'])} API requests left</span>`:''}</div>`;
-    let html=data.opportunities.map(c=>renderCandidate(c)).join('');
-    if(!html) html='<div class="panel">No pairs meet the current filters. Try increasing the maximum vig gap or low-leg probability.</div>';
-    if(data.near_misses?.length) html+=`<details><summary>Show ${data.near_misses.length} closest filtered pairs</summary>${data.near_misses.map(c=>renderCandidate(c,true)).join('')}</details>`;
-    $('results').innerHTML=html;
-  } catch(err){$('status').innerHTML=`<div class="error">${h(err.message)}</div>`} finally {button.disabled=false}
+    if(loadScope){syncAnalysisScope();unlockAnalysis()}
+    renderResults(data);
+  } catch(err){$('status').innerHTML=`<div class="error">${h(err.message)}</div>`} finally {buttons.forEach(x=>x.disabled=false)}
 }
-$('find').addEventListener('click',run);
-$('kalshi').addEventListener('change',()=>{if(!$('kalshi').checked)$('requireKalshi').checked=false});
-document.querySelectorAll('.bookmaker,.bookmaker-all').forEach(x=>x.addEventListener('change',()=>syncBookmakers(x)));
+$('continue').addEventListener('click',()=>run(false,true));
+$('find').addEventListener('click',()=>run(false,false));
+$('refresh').addEventListener('click',()=>run(true,true));
+$('kalshi').addEventListener('change',()=>{if(!$('kalshi').checked)$('requireKalshi').checked=false;lockAnalysis()});
+$('filterKalshi').addEventListener('change',()=>{const enabled=$('filterKalshi').checked;$('requireKalshi').disabled=!enabled;if(!enabled)$('requireKalshi').checked=false});
+document.querySelectorAll('.bookmaker,.bookmaker-all').forEach(x=>x.addEventListener('change',()=>{syncBookmakers(x);lockAnalysis()}));
+document.querySelectorAll('.scope-market,#live').forEach(x=>x.addEventListener('change',lockAnalysis));
 function syncSportMarkets(){
   const sport=$('sport').value, nfl=sport==='americanfootball_nfl', tennis=sport.startsWith('tennis_');
   $('tdMarket').disabled=!nfl;
@@ -196,7 +260,10 @@ function syncSportMarkets(){
     input.disabled=tennis; if(tennis)input.checked=false; label.style.opacity=tennis?'.45':'1';
   }
 }
-$('sport').addEventListener('change',syncSportMarkets); syncSportMarkets();
+$('sport').addEventListener('change',()=>{syncSportMarkets();lockAnalysis()});
+$('regions').addEventListener('input',lockAnalysis);
+$('hours').addEventListener('input',lockAnalysis);
+syncSportMarkets();
 </script></body></html>"""
 
 
@@ -290,8 +357,12 @@ class UiHandler(BaseHTTPRequestHandler):
             payload = json.loads(self.rfile.read(length))
             if not isinstance(payload, dict):
                 raise finder.FinderError("Expected a JSON object")
+            if payload.get("refresh_prices") is True:
+                ODDS_CACHE.clear()
             report = finder.run_finder(
-                _config(payload), os.environ.get("THE_ODDS_API_KEY", "").strip()
+                _config(payload),
+                os.environ.get("THE_ODDS_API_KEY", "").strip(),
+                odds_cache=ODDS_CACHE,
             )
             near = max(0, min(50, int(payload.get("near_misses", 5))))
             result = finder.report_dict(report, include_rejected=near)

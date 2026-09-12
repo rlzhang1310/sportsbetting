@@ -26,6 +26,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_CEILING, ROUND_HALF_UP
 from difflib import SequenceMatcher
 from pathlib import Path
+from threading import Lock
 from typing import Any, Iterable, Mapping, Sequence
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit, urlunsplit
@@ -232,6 +233,34 @@ class JsonResponse:
     headers: Mapping[str, str]
 
 
+class OddsResponseCache:
+    """Short-lived in-memory cache for an upstream market-data snapshot."""
+
+    def __init__(self, ttl_seconds: float = 300.0) -> None:
+        self.ttl_seconds = max(0.0, ttl_seconds)
+        self._entries: dict[tuple[Any, ...], tuple[float, JsonResponse]] = {}
+        self._lock = Lock()
+
+    def get(self, key: tuple[Any, ...]) -> JsonResponse | None:
+        with self._lock:
+            entry = self._entries.get(key)
+            if entry is None:
+                return None
+            created, response = entry
+            if time.monotonic() - created > self.ttl_seconds:
+                del self._entries[key]
+                return None
+            return response
+
+    def put(self, key: tuple[Any, ...], response: JsonResponse) -> None:
+        with self._lock:
+            self._entries[key] = (time.monotonic(), response)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._entries.clear()
+
+
 class JsonHttpClient:
     def __init__(
         self,
@@ -323,20 +352,61 @@ class OddsEvent:
 
 
 class OddsApiClient:
-    def __init__(self, http: JsonHttpClient, api_key: str) -> None:
+    def __init__(
+        self,
+        http: JsonHttpClient,
+        api_key: str,
+        cache: OddsResponseCache | None = None,
+    ) -> None:
         if not api_key:
             raise FinderError(
                 "THE_ODDS_API_KEY is missing. Put it in .env or the environment."
             )
         self.http = http
         self.api_key = api_key
+        self.cache = cache
 
-    def get_sports(self) -> list[dict[str, Any]]:
+    def _get(
+        self,
+        path: str,
+        params: Mapping[str, Any],
+    ) -> JsonResponse:
+        cache_params = dict(params)
+        commence_from = parse_timestamp(cache_params.pop("commenceTimeFrom", None))
+        commence_to = parse_timestamp(cache_params.pop("commenceTimeTo", None))
+        if commence_from is not None and commence_to is not None:
+            cache_params["commenceWindowSeconds"] = int(
+                (commence_to - commence_from).total_seconds()
+            )
+        key = (
+            "odds",
+            path,
+            tuple(
+                sorted(
+                    (name, str(value)) for name, value in cache_params.items()
+                )
+            ),
+        )
+        if self.cache is not None:
+            cached = self.cache.get(key)
+            if cached is not None:
+                return JsonResponse(
+                    cached.data,
+                    {**cached.headers, "x-snapshot-cache": "reused"},
+                )
         response = self.http.get(
             ODDS_API_ROOT,
-            "sports",
-            params={"apiKey": self.api_key, "all": "true"},
+            path,
+            params=params,
             secret_params=("apiKey",),
+        )
+        if self.cache is not None:
+            self.cache.put(key, response)
+        return response
+
+    def get_sports(self) -> list[dict[str, Any]]:
+        response = self._get(
+            "sports", {"apiKey": self.api_key, "all": "true"}
         )
         if not isinstance(response.data, list):
             raise ApiError("The Odds API sports endpoint returned an unexpected shape")
@@ -367,12 +437,7 @@ class OddsApiClient:
         if commence_to:
             params["commenceTimeTo"] = iso_z(commence_to)
 
-        response = self.http.get(
-            ODDS_API_ROOT,
-            f"sports/{sport_key}/odds",
-            params=params,
-            secret_params=("apiKey",),
-        )
+        response = self._get(f"sports/{sport_key}/odds", params)
         if not isinstance(response.data, list):
             raise ApiError("The Odds API returned an unexpected response shape")
         quota = {
@@ -381,6 +446,7 @@ class OddsApiClient:
                 "x-requests-remaining",
                 "x-requests-used",
                 "x-requests-last",
+                "x-snapshot-cache",
             )
             if key in response.headers
         }
@@ -405,17 +471,19 @@ class OddsApiClient:
             params["bookmakers"] = ",".join(bookmakers)
         else:
             params["regions"] = ",".join(regions)
-        response = self.http.get(
-            ODDS_API_ROOT,
-            f"sports/{sport_key}/events/{event_id}/odds",
-            params=params,
-            secret_params=("apiKey",),
+        response = self._get(
+            f"sports/{sport_key}/events/{event_id}/odds", params
         )
         if not isinstance(response.data, Mapping):
             raise ApiError("The Odds API event endpoint returned an unexpected shape")
         quota = {
             key: response.headers[key]
-            for key in ("x-requests-remaining", "x-requests-used", "x-requests-last")
+            for key in (
+                "x-requests-remaining",
+                "x-requests-used",
+                "x-requests-last",
+                "x-snapshot-cache",
+            )
             if key in response.headers
         }
         return dict(response.data), quota
@@ -677,11 +745,40 @@ def parse_anytime_td_events(
 
 
 class KalshiApiClient:
-    def __init__(self, http: JsonHttpClient) -> None:
+    def __init__(
+        self,
+        http: JsonHttpClient,
+        cache: OddsResponseCache | None = None,
+    ) -> None:
         self.http = http
+        self.cache = cache
+
+    def _get(
+        self,
+        path: str,
+        params: Mapping[str, Any] | None = None,
+    ) -> JsonResponse:
+        key = (
+            "kalshi",
+            path,
+            tuple(
+                sorted(
+                    (name, str(value))
+                    for name, value in (params or {}).items()
+                )
+            ),
+        )
+        if self.cache is not None:
+            cached = self.cache.get(key)
+            if cached is not None:
+                return cached
+        response = self.http.get(KALSHI_API_ROOT, path, params=params)
+        if self.cache is not None:
+            self.cache.put(key, response)
+        return response
 
     def get_series(self, ticker: str) -> dict[str, Any]:
-        data = self.http.get(KALSHI_API_ROOT, f"series/{ticker}").data
+        data = self._get(f"series/{ticker}").data
         series = data.get("series") if isinstance(data, Mapping) else None
         if not isinstance(series, Mapping):
             raise ApiError(f"Kalshi series {ticker} returned an unexpected response")
@@ -700,7 +797,7 @@ class KalshiApiClient:
             }
             if cursor:
                 params["cursor"] = cursor
-            data = self.http.get(KALSHI_API_ROOT, "events", params=params).data
+            data = self._get("events", params).data
             if not isinstance(data, Mapping) or not isinstance(data.get("events"), list):
                 raise ApiError("Kalshi events endpoint returned an unexpected response")
             events.extend(item for item in data["events"] if isinstance(item, dict))
@@ -720,10 +817,9 @@ class KalshiApiClient:
             chunk = unique[offset : offset + 2000]
             if not chunk:
                 continue
-            data = self.http.get(
-                KALSHI_API_ROOT,
+            data = self._get(
                 "structured_targets",
-                params={"ids": chunk, "page_size": 2000},
+                {"ids": chunk, "page_size": 2000},
             ).data
             rows = data.get("structured_targets") if isinstance(data, Mapping) else None
             if not isinstance(rows, list):
@@ -736,9 +832,7 @@ class KalshiApiClient:
         return targets
 
     def get_orderbook(self, market_ticker: str) -> dict[str, Any]:
-        data = self.http.get(
-            KALSHI_API_ROOT, f"markets/{market_ticker}/orderbook"
-        ).data
+        data = self._get(f"markets/{market_ticker}/orderbook").data
         if not isinstance(data, Mapping):
             raise ApiError(f"Unexpected orderbook response for {market_ticker}")
         return dict(data)
@@ -872,6 +966,7 @@ class KalshiEvent:
     occurrence_time: datetime
     mutually_exclusive: bool
     participants: tuple[KalshiParticipant, ...]
+    series_title: str = ""
     fee_type_override: str | None = None
     fee_multiplier_override: Decimal | None = None
 
@@ -879,6 +974,8 @@ class KalshiEvent:
 def parse_kalshi_events(
     payload: Sequence[Mapping[str, Any]],
     targets: Mapping[str, Mapping[str, Any]],
+    *,
+    series_title: str = "",
 ) -> tuple[list[KalshiEvent], list[str]]:
     parsed: list[KalshiEvent] = []
     diagnostics: list[str] = []
@@ -969,6 +1066,7 @@ def parse_kalshi_events(
                 occurrence_time=earliest,
                 mutually_exclusive=bool(raw_event.get("mutually_exclusive")),
                 participants=tuple(participants),
+                series_title=series_title,
                 fee_type_override=fee_type_override,
                 fee_multiplier_override=fee_multiplier_override,
             )
@@ -1145,6 +1243,17 @@ def asks_for_side(orderbook: ParsedOrderbook, side: str) -> tuple[PriceLevel, ..
     return tuple(asks)
 
 
+def bids_for_side(orderbook: ParsedOrderbook, side: str) -> tuple[PriceLevel, ...]:
+    normalized = side.casefold()
+    if normalized == "yes":
+        bids = orderbook.yes_bids
+    elif normalized == "no":
+        bids = orderbook.no_bids
+    else:
+        raise ValueError(f"Unknown Kalshi side {side!r}")
+    return tuple(sorted(bids, key=lambda level: level.price, reverse=True))
+
+
 @dataclass(frozen=True)
 class FilledLevel:
     price: Decimal
@@ -1176,7 +1285,11 @@ class FeeModel:
     fee_type: str
     multiplier: Decimal
 
-    def taker_fee(self, fills: Sequence[FilledLevel]) -> Decimal:
+    def _quadratic_fee(
+        self,
+        fills: Sequence[FilledLevel],
+        rate: Decimal,
+    ) -> Decimal:
         if self.multiplier == ZERO:
             return ZERO
         if not self.fee_type.startswith("quadratic"):
@@ -1185,13 +1298,21 @@ class FeeModel:
         for fill in fills:
             raw = (
                 self.multiplier
-                * Decimal("0.07")
+                * rate
                 * fill.quantity
                 * fill.price
                 * (ONE - fill.price)
             )
             total += ceil_to(raw, Decimal("0.000001"))
         return total
+
+    def taker_fee(self, fills: Sequence[FilledLevel]) -> Decimal:
+        return self._quadratic_fee(fills, Decimal("0.07"))
+
+    def limit_fee(self, fills: Sequence[FilledLevel]) -> Decimal:
+        """Fee for a resting limit order, at one quarter of the taker rate."""
+
+        return self._quadratic_fee(fills, Decimal("0.0175"))
 
 
 def series_fee_model(series: Mapping[str, Any]) -> FeeModel:
@@ -1244,6 +1365,7 @@ class KalshiRoute:
     fractional: bool
     tie_settlement: Decimal | None
     fee_model: FeeModel
+    bids: tuple[PriceLevel, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -1422,6 +1544,7 @@ def materialize_route(
         fractional=spec.fractional,
         tie_settlement=None,
         fee_model=spec.fee_model,
+        bids=bids_for_side(book, spec.side),
     )
 
 
@@ -1537,6 +1660,30 @@ def evaluate_kalshi_route(
     model_fee = route.fee_model.taker_fee(fills)
     total_cost = ceil_to(position_cost + model_fee, balance_precision)
     average_price = position_cost / contracts
+    current_level = route.asks[0]
+    one_cent_lower_bid = max(
+        ZERO, current_level.price - Decimal("0.01")
+    )
+    current_unit_fee = route.fee_model.taker_fee(
+        (FilledLevel(current_level.price, ONE),)
+    )
+    lower_bid_unit_fee = route.fee_model.limit_fee(
+        (FilledLevel(one_cent_lower_bid, ONE),)
+    )
+    current_implied_probability = (
+        current_level.price + current_unit_fee
+    ) / route.notional
+    lower_bid_implied_probability = (
+        one_cent_lower_bid + lower_bid_unit_fee
+    ) / route.notional
+    bid_volume = sum(
+        (
+            level.quantity
+            for level in route.bids
+            if level.price == one_cent_lower_bid
+        ),
+        ZERO,
+    )
     tie_return = (
         contracts * route.notional * route.tie_settlement
         if route.tie_settlement is not None
@@ -1555,6 +1702,16 @@ def evaluate_kalshi_route(
             "contracts": decimal_text(contracts),
             "average_price": decimal_text(
                 average_price.quantize(Decimal("0.0001"))
+            ),
+            "current_price": decimal_text(current_level.price),
+            "current_price_volume": decimal_text(current_level.quantity),
+            "current_price_implied_probability": decimal_text(
+                current_implied_probability
+            ),
+            "one_cent_lower_bid_price": decimal_text(one_cent_lower_bid),
+            "one_cent_lower_bid_volume": decimal_text(bid_volume),
+            "one_cent_lower_bid_implied_probability": decimal_text(
+                lower_bid_implied_probability
             ),
             "position_cost": decimal_text(position_cost),
             "fee": decimal_text(total_cost - position_cost),
@@ -1617,6 +1774,7 @@ def make_kalshi_routes(
                 fractional=fractional,
                 tie_settlement=yes_tie,
                 fee_model=fee_model,
+                bids=bids_for_side(orderbook, "yes"),
             )
         )
         # Deliberately do not relabel BUY NO on one team as BUY YES on the
@@ -1643,6 +1801,12 @@ class Candidate:
     probability_spread: Decimal
     eligible: bool
     rejection_reason: str | None
+
+
+def candidate_sort_key(candidate: Candidate) -> tuple[Decimal, Decimal]:
+    """Order results by signed vig, with the most negative vig first."""
+
+    return candidate.vig, candidate.low_probability
 
 
 def build_candidate(
@@ -1834,12 +1998,26 @@ def _parallel_fetch(
     return values, errors
 
 
-def run_finder(config: RunConfig, api_key: str) -> RunReport:
+def run_finder(
+    config: RunConfig,
+    api_key: str,
+    *,
+    odds_cache: OddsResponseCache | None = None,
+) -> RunReport:
     now = datetime.now(timezone.utc)
+    request_anchor = now.replace(
+        minute=now.minute - now.minute % 5,
+        second=0,
+        microsecond=0,
+    )
     http = JsonHttpClient(timeout=config.timeout, retries=config.retries)
-    odds_client = OddsApiClient(http, api_key)
-    from_time = now - timedelta(hours=12) if config.include_live else now
-    to_time = now + timedelta(hours=float(config.hours_ahead))
+    odds_client = OddsApiClient(http, api_key, cache=odds_cache)
+    from_time = (
+        request_anchor - timedelta(hours=12)
+        if config.include_live
+        else request_anchor
+    )
+    to_time = request_anchor + timedelta(hours=float(config.hours_ahead))
     main_markets = tuple(
         dict.fromkeys(
             ("h2h",)
@@ -1957,17 +2135,21 @@ def run_finder(config: RunConfig, api_key: str) -> RunReport:
             for event in selected_events
             if (candidate := make_candidate(event, (), None)) is not None
         ]
-        candidates.sort(key=lambda item: (item.vig_gap, item.low_probability))
+        candidates.sort(key=candidate_sort_key)
         return RunReport(
             config, len(selected_events), 0, 0, candidates, diagnostics, quota
         )
 
-    kalshi_client = KalshiApiClient(http)
+    kalshi_client = KalshiApiClient(http, cache=odds_cache)
     series = kalshi_client.get_series(config.kalshi_series)
     base_fee = series_fee_model(series)
     raw_kalshi = kalshi_client.get_open_events(config.kalshi_series)
     targets = kalshi_client.get_structured_targets(collect_target_ids(raw_kalshi))
-    kalshi_events, kalshi_diagnostics = parse_kalshi_events(raw_kalshi, targets)
+    kalshi_events, kalshi_diagnostics = parse_kalshi_events(
+        raw_kalshi,
+        targets,
+        series_title=str(series.get("title", "")),
+    )
     diagnostics.extend(kalshi_diagnostics)
     base_odds_events = [event for event in odds_events if event.market_key == "h2h"]
     base_matches, match_diagnostics = match_events(
@@ -2005,9 +2187,8 @@ def run_finder(config: RunConfig, api_key: str) -> RunReport:
         if not comparisons or not series_ticker:
             continue
         try:
-            derivative_fee = series_fee_model(
-                kalshi_client.get_series(series_ticker)
-            )
+            derivative_series_data = kalshi_client.get_series(series_ticker)
+            derivative_fee = series_fee_model(derivative_series_data)
             raw_derivatives = kalshi_client.get_open_events(series_ticker)
             derivative_targets = kalshi_client.get_structured_targets(
                 collect_target_ids(raw_derivatives)
@@ -2049,6 +2230,7 @@ def run_finder(config: RunConfig, api_key: str) -> RunReport:
                 or base_match.kalshi.occurrence_time,
                 mutually_exclusive=bool(raw_event.get("mutually_exclusive")),
                 participants=base_match.kalshi.participants,
+                series_title=str(derivative_series_data.get("title", "")),
             )
             comparison_matches[comparison.event_id] = MatchedEvent(
                 comparison,
@@ -2112,7 +2294,7 @@ def run_finder(config: RunConfig, api_key: str) -> RunReport:
         candidate = make_candidate(event, routes, match)
         if candidate:
             candidates.append(candidate)
-    candidates.sort(key=lambda item: (item.vig_gap, item.low_probability))
+    candidates.sort(key=candidate_sort_key)
     return RunReport(
         config=config,
         odds_events=len(selected_events),
@@ -2136,12 +2318,30 @@ def decimal_text(value: Decimal) -> str:
     return format(value, "f")
 
 
+def kalshi_event_url(event: KalshiEvent) -> str | None:
+    """Build the public Kalshi page URL for a matched event."""
+
+    if not event.series_ticker or not event.event_ticker:
+        return None
+    slug_source = event.series_title or event.title or event.series_ticker
+    normalized = unicodedata.normalize("NFKD", slug_source)
+    ascii_text = normalized.encode("ascii", "ignore").decode("ascii")
+    slug = re.sub(r"[^a-z0-9]+", "-", ascii_text.casefold()).strip("-")
+    if not slug:
+        slug = event.series_ticker.casefold()
+    return (
+        "https://kalshi.com/markets/"
+        f"{event.series_ticker.casefold()}/{slug}/{event.event_ticker.casefold()}"
+    )
+
+
 def candidate_dict(candidate: Candidate) -> dict[str, Any]:
     event = candidate.match.odds
     return {
         "event": {
             "odds_event_id": event.event_id,
             "kalshi_event_ticker": candidate.match.kalshi.event_ticker or None,
+            "kalshi_url": kalshi_event_url(candidate.match.kalshi),
             "sport": event.sport_key,
             "commence_time": iso_z(event.commence_time),
             "home_team": event.home_team,
