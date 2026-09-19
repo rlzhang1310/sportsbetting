@@ -481,6 +481,45 @@ class CandidateTests(unittest.TestCase):
         self.assertLess(candidate.vig_gap, D("0.02"))  # type: ignore[union-attr]
         self.assertLess(candidate.low_probability, D("0.48"))  # type: ignore[union-attr]
 
+    def test_wager_amount_sizes_kalshi_to_sportsbook_gross_return(self) -> None:
+        match = matched_two_team_event(
+            home_offers=(sportsbook_offer("Alpha Wolves", "10.00"),),
+        )
+        route = finder.KalshiRoute(
+            selection="Beta Bears",
+            market_ticker="KXGAME-BETA",
+            side="yes",
+            asks=(finder.PriceLevel(D("0.90"), D("2000")),),
+            notional=D("1"),
+            fractional=False,
+            tie_settlement=None,
+            fee_model=finder.FeeModel("quadratic", D("0")),
+        )
+        candidate = finder.build_candidate(
+            match,
+            (route,),
+            target_payout=D("100"),
+            wager_amount=D("100"),
+            stake_increment=D("0.01"),
+            balance_precision=D("0.0001"),
+            tie_possible=False,
+            sportsbook_tie_mode="push",
+            minimum_profit=D("0"),
+            minimum_roi=D("0"),
+            require_kalshi=True,
+        )
+        self.assertIsNotNone(candidate)
+        sportsbook_leg = next(
+            leg for leg in candidate.legs if leg.source_type == "sportsbook"  # type: ignore[union-attr]
+        )
+        kalshi_leg = next(
+            leg for leg in candidate.legs if leg.source_type == "kalshi"  # type: ignore[union-attr]
+        )
+        self.assertEqual(sportsbook_leg.detail["stake"], "100")
+        self.assertEqual(sportsbook_leg.win_return, D("1000"))
+        self.assertEqual(kalshi_leg.detail["contracts"], "1000")
+        self.assertEqual(kalshi_leg.win_return, D("1000"))
+
     def test_require_kalshi_chooses_close_mixed_pair_not_sportsbook_pair(self) -> None:
         match = matched_two_team_event(
             home_offers=(sportsbook_offer("Alpha Wolves", "2.00"),),
@@ -764,6 +803,18 @@ class ClientAndSerializationTests(unittest.TestCase):
         self.assertEqual(
             kalshi_leg["one_cent_lower_bid_implied_probability"], "0.54"
         )
+        self.assertEqual(
+            kalshi_leg["orderbook_levels"],
+            [{"price": "0.55", "quantity": "200"}],
+        )
+        self.assertEqual(kalshi_leg["notional"], "1")
+        self.assertEqual(kalshi_leg["maker_fee_rate"], "0.0175")
+        sportsbook_leg = next(
+            leg
+            for leg in decoded["opportunities"][0]["legs"]
+            if leg["source_type"] == "sportsbook"
+        )
+        self.assertEqual(sportsbook_leg["stake_increment"], "0.01")
         self.assertEqual(
             decoded["opportunities"][0]["event"]["kalshi_url"],
             "https://kalshi.com/markets/kxncaafgame/"

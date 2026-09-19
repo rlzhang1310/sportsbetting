@@ -15,10 +15,22 @@ probabilities and calculates:
 - **vig gap** = absolute distance between the implied sum and 100%; and
 - **lower leg** = the smaller of the two implied probabilities.
 
-Results are ranked by absolute vig gap first, then lower-leg probability. The
-maximum vig filter applies to that absolute distance from 100%, whether the vig
-is positive or negative. Use the filters to decide what counts as close;
-automatic promo-bet sizing is intentionally left for a later feature.
+Results use signed-vig order by default, so negative vig appears before zero and
+positive vig. The maximum vig filter still applies to the absolute distance
+from 100%, whether the vig is positive or negative. In the browser UI, results
+can instead be ranked by modeled profit from a profit boost or bonus bet.
+
+The promotion bet amount sizes both the sportsbook wager and its opposing
+hedge. For example, a $100 wager at +900 returns $1,000 before any boost, so the
+matching side uses 1,000 standard $1 Kalshi contracts (subject to available
+depth). The promotion calculator also accepts a boost percentage. Profit boosts
+apply the boost to sportsbook winnings while returning
+the cash stake; bonus-bet calculations exclude the promotional stake from the
+return. For a Kalshi hedge, promotion results model a resting limit order one
+cent below the current ask, including the maker fee and contract/balance
+rounding. The UI shows the boosted odds, required contracts, limit price,
+Kalshi spend, total outlay, and guaranteed total made. Because a resting order
+may not execute, the calculation assumes the full Kalshi order fills.
 
 Sportsbook prices are displayed as American odds. Under each selected leg, the
 UI also lists other sportsbooks whose price is within one implied-probability
@@ -43,9 +55,12 @@ python arbitrage_finder.py --ui
 
 This serves a private local page at `http://127.0.0.1:8765/`. The API key stays
 in Python and is never sent to browser code. Stop it with `Ctrl+C` in the
-terminal. The Bookmakers dropdown supports selecting any number of sportsbooks;
-leave **All bookmakers** selected to use every book returned for the chosen
-regions.
+terminal. The Bookmakers dropdown supports multiple sportsbooks and closes with
+**Done**, an outside click, or Escape. Leave **All bookmakers** selected to use
+every book returned for the chosen regions. Step 1 loads a market-data snapshot.
+Step 2 can narrow the loaded markets, toggle Kalshi, change analysis and
+promotion inputs, and sort results without another external API request. Use
+**Refresh prices** to replace the snapshot.
 
 The Markets controls support:
 
@@ -160,8 +175,9 @@ Change the sportsbook assumption with `--sportsbook-tie loss` if appropriate.
 - Settlement, postponement, cancellation, and void rules can differ across
   venues. Read both contracts before trading even when every modeled payoff is
   nonnegative.
-- Maker orders are intentionally excluded because a resting order is not an
-  immediately executable comparison leg.
+- Maker orders are excluded from filtering and ranking because a resting order
+  is not immediately executable. Promotion cards show the one-cent-below maker
+  projection for comparison, with a full-fill warning.
 
 Current API references used by the implementation:
 

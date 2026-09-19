@@ -14,13 +14,14 @@ class UiConfigTests(unittest.TestCase):
                 "max_vig": 2.5,
                 "max_low_probability": 35,
                 "hours_ahead": 48,
-                "payout": 100,
+                "promotion_amount": 125,
                 "include_kalshi": True,
                 "require_kalshi": True,
             }
         )
         self.assertEqual(config.maximum_vig, Decimal("0.025"))
         self.assertEqual(config.max_low_probability, Decimal("0.35"))
+        self.assertEqual(config.wager_amount, Decimal("125"))
         self.assertTrue(config.require_kalshi)
 
     def test_ui_accepts_multiple_market_types(self) -> None:
@@ -48,7 +49,8 @@ class UiConfigTests(unittest.TestCase):
         self.assertIn("American", ui.PAGE)
         self.assertIn("Similar books within 1pp", ui.PAGE)
         self.assertIn("Kalshi order book", ui.PAGE)
-        self.assertIn("Bid (1¢ lower)", ui.PAGE)
+        self.assertIn("Taker ask", ui.PAGE)
+        self.assertIn("Maker limit (1¢ lower)", ui.PAGE)
         self.assertIn("implied with taker fee", ui.PAGE)
         self.assertIn("implied with maker fee", ui.PAGE)
         self.assertIn("Open on Kalshi", ui.PAGE)
@@ -63,6 +65,10 @@ class UiConfigTests(unittest.TestCase):
             'class="bookmaker" type="checkbox" value="fanduel"', ui.PAGE
         )
         self.assertIn("selectedBookmakers()", ui.PAGE)
+        self.assertIn('id="bookmakerDone"', ui.PAGE)
+        self.assertIn("!bookmakerMenu.contains(event.target)", ui.PAGE)
+        self.assertIn("event.key==='Escape'", ui.PAGE)
+        self.assertNotIn("Select any number of books", ui.PAGE)
 
     def test_scope_filters_come_before_disabled_analysis_filters(self) -> None:
         self.assertIn('id="scopePanel"', ui.PAGE)
@@ -79,11 +85,38 @@ class UiConfigTests(unittest.TestCase):
         self.assertLess(ui.PAGE.index('id="hours"'), ui.PAGE.index('id="maxVig"'))
         self.assertLess(ui.PAGE.index('id="live"'), ui.PAGE.index('id="maxVig"'))
         self.assertLess(ui.PAGE.index('id="kalshi"'), ui.PAGE.index('id="maxVig"'))
-        self.assertGreater(ui.PAGE.index('id="payout"'), ui.PAGE.index('id="maxVig"'))
+        self.assertNotIn('id="amountWagered"', ui.PAGE)
         self.assertIn('class="filter-market"', ui.PAGE)
         self.assertIn('id="filterKalshi"', ui.PAGE)
         self.assertIn("refresh_prices:refreshPrices||loadScope", ui.PAGE)
         self.assertIn('id="refresh"', ui.PAGE)
+
+    def test_promotion_inputs_and_client_side_sorting_are_present(self) -> None:
+        self.assertIn('id="profitBoost"', ui.PAGE)
+        self.assertIn('id="promoAmount"', ui.PAGE)
+        self.assertIn('id="sortBy"', ui.PAGE)
+        self.assertLess(ui.PAGE.index('id="status"'), ui.PAGE.index('id="sortBy"'))
+        self.assertIn('class="sort-control"', ui.PAGE)
+        self.assertIn('Vig (lowest to highest)', ui.PAGE)
+        self.assertIn('Profit boost total made (highest first)', ui.PAGE)
+        self.assertIn('Bonus bet total made (highest first)', ui.PAGE)
+        self.assertIn("'profit_boost'", ui.PAGE)
+        self.assertIn("'bonus_bet'", ui.PAGE)
+        self.assertIn("function promotionMetrics(c)", ui.PAGE)
+        self.assertIn("function hedgeQuote(leg,targetPayout,execution='taker')", ui.PAGE)
+        self.assertIn("promo stake not returned", ui.PAGE)
+        self.assertIn("contracts · cost", ui.PAGE)
+        self.assertIn("wager ${money(leg.stake)}", ui.PAGE)
+        self.assertIn("Taker price:", ui.PAGE)
+        self.assertIn("Maker price:", ui.PAGE)
+        self.assertIn("used for filtering and sorting", ui.PAGE)
+        self.assertIn("comparison only", ui.PAGE)
+        self.assertIn("maker fee", ui.PAGE)
+        self.assertIn("Total made:", ui.PAGE)
+        self.assertIn("totalMade??-Infinity", ui.PAGE)
+        self.assertIn(
+            "Assumes the resting limit order fills completely", ui.PAGE
+        )
 
 
 if __name__ == "__main__":

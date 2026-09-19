@@ -56,6 +56,7 @@ input,select { width:100%; margin-top:6px; padding:10px 11px; border:1px solid v
 .multi-options label { display:flex; align-items:center; gap:8px; padding:7px; border-radius:6px; font-weight:500; }
 .multi-options label:hover { background:var(--accent2); }
 .multi-options input { width:auto; margin:0; }
+.multi-done { width:100%; margin:6px 0 0; padding:8px 11px; border-radius:8px; }
 .checks { display:flex; flex-wrap:wrap; gap:18px; margin-top:18px; }
 .checks label { display:flex; align-items:center; gap:7px; }
 .checks input { width:auto; margin:0; }
@@ -65,8 +66,11 @@ button:disabled { opacity:.55; cursor:wait; }
 .actions { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
 .secondary { color:var(--accent); background:var(--accent2); border:1px solid #a9d3c5; }
 #status { color:var(--muted); margin:16px 2px; min-height:22px; }
-.summary { display:flex; gap:10px; flex-wrap:wrap; margin:14px 0; }
+.summary { display:flex; gap:10px; align-items:center; margin:14px 0; }
+.summary-pills { display:flex; gap:10px; flex-wrap:wrap; }
 .pill { border:1px solid var(--line); background:var(--card); padding:7px 11px; border-radius:999px; }
+.sort-control { display:flex; align-items:center; gap:8px; margin-left:auto; white-space:nowrap; }
+.sort-control select { width:auto; min-width:220px; margin:0; padding:7px 34px 7px 10px; }
 .result { padding:18px; margin:12px 0; }
 .result-head { display:flex; justify-content:space-between; gap:20px; align-items:flex-start; }
 .match { font:700 20px/1.2 Georgia,serif; }
@@ -84,10 +88,16 @@ button:disabled { opacity:.55; cursor:wait; }
 .prob { font-size:20px; font-weight:800; margin-top:6px; }
 .execution { font-size:12px; margin-top:5px; overflow-wrap:anywhere; }
 .alternatives { margin-top:8px; padding-top:8px; border-top:1px dashed var(--line); color:var(--muted); font-size:12px; }
+.promo-summary { display:grid; grid-template-columns:repeat(2,1fr); gap:10px; margin-top:12px; }
+.promo-card { background:#f7f4ec; border:1px solid var(--line); border-radius:11px; padding:11px 12px; }
+.promo-card .amount { color:var(--accent); font-size:21px; font-weight:800; }
+.promo-card .detail { color:var(--muted); font-size:12px; }
+.promo-math { margin-top:8px; padding-top:8px; border-top:1px dashed var(--line); font-size:12px; line-height:1.65; }
+.promo-math strong { color:var(--ink); }
 .tag { color:var(--accent); font-size:11px; font-weight:800; text-transform:uppercase; }
 .error { color:#8b251d; background:#fff0ed; border:1px solid #efc0b8; padding:12px; border-radius:10px; }
 details { color:var(--muted); margin-top:18px; }
-@media(max-width:800px){.grid{grid-template-columns:repeat(2,1fr)}.legs{grid-template-columns:1fr}}
+@media(max-width:800px){.grid{grid-template-columns:repeat(2,1fr)}.legs,.promo-summary{grid-template-columns:1fr}.summary{align-items:flex-start;flex-wrap:wrap}.sort-control{margin-left:0}}
 @media(max-width:480px){.grid{grid-template-columns:1fr}.result-head{display:block}.score{text-align:left;margin-top:10px}}
 </style>
 </head>
@@ -102,7 +112,7 @@ Lower-probability legs are highlighted as natural promo-bet candidates. Kalshi p
   <div class="grid">
     <label>Sport<select id="sport">SPORT_OPTIONS</select></label>
     <label>Regions<input id="regions" value="us,us2"></label>
-    <div><div class="field-title">Bookmakers<span>Select any number of books</span></div>
+    <div><div class="field-title">Bookmakers</div>
       <details class="multi" id="bookmakerMenu"><summary id="bookmakerSummary">All bookmakers</summary>
         <div class="multi-options" id="bookmakerOptions">
           <label><input class="bookmaker-all" type="checkbox" checked> All bookmakers</label>
@@ -121,6 +131,7 @@ Lower-probability legs are highlighted as natural promo-bet candidates. Kalshi p
           <label><input class="bookmaker" type="checkbox" value="mybookieag"> MyBookie.ag</label>
           <label><input class="bookmaker" type="checkbox" value="lowvig"> LowVig.ag</label>
           <label><input class="bookmaker" type="checkbox" value="betanysports"> BetAnySports</label>
+          <button class="multi-done" id="bookmakerDone" type="button">Done</button>
         </div>
       </details>
     </div>
@@ -141,12 +152,13 @@ Lower-probability legs are highlighted as natural promo-bet candidates. Kalshi p
 </section>
 <fieldset class="panel" id="analysisFilters" disabled>
   <legend>Step 2 · Analysis filters</legend>
-  <p class="step-note">These controls reanalyze the loaded snapshot without contacting the external APIs. Refresh only when you need new prices.</p>
+  <p class="step-note">These controls reanalyze the loaded snapshot without contacting the external APIs. Market filters and promotion sorting always use executable taker prices; maker prices are shown only for comparison.</p>
   <div class="grid">
     <label>Maximum vig gap (%)<span>Distance from a 100% implied sum</span><input id="maxVig" type="number" value="5" min="0" step="0.1"></label>
     <label>Maximum low-leg probability (%)<span>Use 100 to show every pair</span><input id="maxLow" type="number" value="100" min="0" max="100" step="1"></label>
-    <label>Pricing payout ($)<span>Used for Kalshi depth and fees</span><input id="payout" type="number" value="100" min="1" step="1"></label>
     <label>Near misses<input id="nearMisses" type="number" value="5" min="0" max="50" step="1"></label>
+    <label>Profit boost (%)<span>Applied to sportsbook winnings</span><input id="profitBoost" type="number" value="25" min="0" step="1"></label>
+    <label>Promotion bet amount ($)<span>Cash stake or bonus-bet face value</span><input id="promoAmount" type="number" value="50" min="0" step="0.01"></label>
   </div>
   <div class="checks">
     <strong>Show markets:</strong>
@@ -167,18 +179,94 @@ Lower-probability legs are highlighted as natural promo-bet candidates. Kalshi p
 <div id="status"></div><div id="results"></div>
 </main>
 <script>
-const $=id=>document.getElementById(id), pct=x=>(Number(x)*100).toFixed(2)+'%', price=x=>'$'+Number(x).toFixed(2), volume=x=>Number(x).toLocaleString(undefined,{maximumFractionDigits:2});
+const $=id=>document.getElementById(id), pct=x=>(Number(x)*100).toFixed(2)+'%', price=x=>'$'+Number(x).toFixed(2), money=x=>`${Number(x)<0?'−':''}$${Math.abs(Number(x)).toFixed(2)}`, volume=x=>Number(x).toLocaleString(undefined,{maximumFractionDigits:2});
 const h=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-function legText(leg){
-  if(leg.source_type==='kalshi') return `BUY ${h(leg.side)} · ${h(leg.market_ticker)} · avg $${h(leg.average_price)} · fee $${h(leg.fee)}`;
-  return `American ${h(leg.american_odds)} · ${h(leg.bookmaker_key)}`;
+let lastData=null,sortMode='vig';
+const ceilTo=(value,increment)=>Math.ceil((value-1e-10)/increment)*increment;
+function sortControl(){
+  const options=[['vig','Vig (lowest to highest)'],['profit_boost','Profit boost total made (highest first)'],['bonus_bet','Bonus bet total made (highest first)']];
+  return `<label class="sort-control">Sort by <select id="sortBy">${options.map(([value,label])=>`<option value="${value}"${sortMode===value?' selected':''}>${label}</option>`).join('')}</select></label>`;
 }
-function renderCandidate(c, rejected=false){
+function americanFromDecimal(decimalOdds){
+  const american=decimalOdds>=2?(decimalOdds-1)*100:-100/(decimalOdds-1);
+  return `${american>=0?'+':''}${Math.round(american)}`;
+}
+function hedgeQuote(leg,targetPayout,execution='taker'){
+  if(!(targetPayout>0))return null;
+  if(leg.source_type==='sportsbook'){
+    const odds=Number(leg.decimal_odds), increment=Number(leg.stake_increment||0.01);
+    const cost=ceilTo(targetPayout/odds,increment);
+    return {cost,winReturn:cost*odds,tieReturn:cost,orderType:'sportsbook'};
+  }
+  if(leg.source_type!=='kalshi')return null;
+  const notional=Number(leg.notional||1), contractIncrement=leg.fractional?0.01:1;
+  const contracts=ceilTo(targetPayout/notional,contractIncrement);
+  let positionCost=0,fee=0,executionPrice=0;
+  if(execution==='maker'){
+    executionPrice=Number(leg.one_cent_lower_bid_price);
+    if(!(executionPrice>0&&executionPrice<notional))return null;
+    positionCost=contracts*executionPrice;
+    const raw=Number(leg.fee_multiplier||0)*Number(leg.maker_fee_rate||0.0175)*contracts*executionPrice*(1-executionPrice);
+    fee=ceilTo(raw,0.000001);
+  }else{
+    let remaining=contracts;
+    for(const level of (leg.orderbook_levels||[])){
+      if(remaining<=1e-9)break;
+      const quantity=Math.min(Number(level.quantity),remaining),levelPrice=Number(level.price);
+      if(!(quantity>0))continue;
+      positionCost+=quantity*levelPrice;
+      const raw=Number(leg.fee_multiplier||0)*0.07*quantity*levelPrice*(1-levelPrice);
+      fee+=ceilTo(raw,0.000001);
+      remaining-=quantity;
+    }
+    if(remaining>1e-7)return null;
+    executionPrice=positionCost/contracts;
+  }
+  const cost=ceilTo(positionCost+fee,Number(leg.balance_precision||0.0001));
+  const tie=leg.tie_settlement==null?null:contracts*notional*Number(leg.tie_settlement);
+  return {cost,winReturn:contracts*notional,tieReturn:tie,contracts,executionPrice,currentAsk:Number(leg.current_price),positionCost,fee,orderType:execution};
+}
+function promotionExecution(hedge,payout,cashStake,tieRefund,tiePossible){
+  if(!hedge)return null;
+  const totalOutlay=cashStake+hedge.cost,outcomes=[payout-totalOutlay,hedge.winReturn-totalOutlay];
+  if(tiePossible&&hedge.tieReturn!=null)outcomes.push(tieRefund+hedge.tieReturn-totalOutlay);
+  return {...hedge,totalOutlay,totalMade:Math.min(...outcomes)};
+}
+function promotionMetrics(c){
+  const amount=Number($('promoAmount').value),boost=Number($('profitBoost').value)/100,tiePossible=Object.hasOwn(c.scenario_profits||{},'Tie');
+  if(!(amount>0)||!(boost>=0)||c.legs.length!==2)return null;
+  let bestBoost=null,bestBonus=null;
+  c.legs.forEach((promoLeg,index)=>{
+    if(promoLeg.source_type!=='sportsbook')return;
+    const hedgeLeg=c.legs[1-index],odds=Number(promoLeg.decimal_odds);
+    if(!(odds>1))return;
+    const boostMultiplier=1+boost,boostedOdds=1+(odds-1)*boostMultiplier,boostedPayout=amount*boostedOdds;
+    const boostedTaker=promotionExecution(hedgeQuote(hedgeLeg,boostedPayout,'taker'),boostedPayout,amount,amount,tiePossible);
+    const boostedMaker=promotionExecution(hedgeQuote(hedgeLeg,boostedPayout,'maker'),boostedPayout,amount,amount,tiePossible);
+    if(boostedTaker){
+      const item={totalMade:boostedTaker.totalMade,selection:promoLeg.selection,venue:promoLeg.venue,taker:boostedTaker,maker:boostedMaker,amount,originalAmerican:promoLeg.american_odds,boostMultiplier,boostedAmerican:americanFromDecimal(boostedOdds),sportsbookReturn:boostedPayout};
+      if(!bestBoost||item.totalMade>bestBoost.totalMade)bestBoost=item;
+    }
+    const bonusPayout=amount*(odds-1);
+    const bonusTaker=promotionExecution(hedgeQuote(hedgeLeg,bonusPayout,'taker'),bonusPayout,0,0,tiePossible);
+    const bonusMaker=promotionExecution(hedgeQuote(hedgeLeg,bonusPayout,'maker'),bonusPayout,0,0,tiePossible);
+    if(bonusTaker){
+      const item={totalMade:bonusTaker.totalMade,selection:promoLeg.selection,venue:promoLeg.venue,taker:bonusTaker,maker:bonusMaker,amount,originalAmerican:promoLeg.american_odds,sportsbookReturn:bonusPayout};
+      if(!bestBonus||item.totalMade>bestBonus.totalMade)bestBonus=item;
+    }
+  });
+  return bestBoost||bestBonus?{boost:bestBoost,bonus:bestBonus}:null;
+}
+function legText(leg){
+  if(leg.source_type==='kalshi') return `BUY ${h(leg.side)} · ${h(leg.market_ticker)} · ${volume(leg.contracts)} contracts · cost ${money(leg.cost)} · avg $${h(leg.average_price)} · fee $${h(leg.fee)}`;
+  return `American ${h(leg.american_odds)} · ${h(leg.bookmaker_key)} · wager ${money(leg.stake)}`;
+}
+function renderCandidate(c, rejected=false, promo=promotionMetrics(c)){
   const e=c.event, low=Number(c.low_probability);
   const kalshiLink=e.kalshi_url?` · <a class="kalshi-link" href="${h(e.kalshi_url)}" target="_blank" rel="noopener noreferrer">Open on Kalshi ↗</a>`:'';
   const legs=c.legs.map(l=>{const p=Number(c.implied_probabilities[l.selection]);
     const nearby=(l.similar_sportsbooks||[]).map(x=>`${h(x.venue)} <strong>${h(x.american_odds)}</strong>`).join(' · ');
-    const kalshiDepth=l.source_type==='kalshi'&&l.current_price!=null?`<div class="alternatives"><strong>Kalshi order book</strong><br>Current ask <strong>${price(l.current_price)}</strong> · ${pct(l.current_price_implied_probability)} implied with taker fee · volume ${volume(l.current_price_volume)}<br>Bid (1¢ lower) <strong>${price(l.one_cent_lower_bid_price)}</strong> · ${pct(l.one_cent_lower_bid_implied_probability)} implied with maker fee · volume ${volume(l.one_cent_lower_bid_volume)}</div>`:'';
+    const kalshiDepth=l.source_type==='kalshi'&&l.current_price!=null?`<div class="alternatives"><strong>Kalshi order book</strong><br>Taker ask <strong>${price(l.current_price)}</strong> · ${pct(l.current_price_implied_probability)} implied with taker fee · volume ${volume(l.current_price_volume)}<br>Maker limit (1¢ lower) <strong>${price(l.one_cent_lower_bid_price)}</strong> · ${pct(l.one_cent_lower_bid_implied_probability)} implied with maker fee · resting volume ${volume(l.one_cent_lower_bid_volume)}</div>`:'';
     return `
     <div class="leg ${Math.abs(p-low)<1e-10?'low':''}">
       ${Math.abs(p-low)<1e-10?'<div class="tag">Lower-probability leg</div>':''}
@@ -187,10 +275,19 @@ function renderCandidate(c, rejected=false){
       ${kalshiDepth}
       ${nearby?`<div class="alternatives"><strong>Similar books within 1pp</strong><br>${nearby}</div>`:''}
     </div>`}).join('');
+  const executionMath=(label,x)=>{if(!x)return '';
+    if(x.orderType==='sportsbook')return `<strong>${label}</strong><br>Hedge spent: <strong>${money(x.cost)}</strong><br>Total made: <strong>${money(x.totalMade)}</strong>`;
+    const priceLine=x.orderType==='taker'?`Taker price: <strong>${price(x.currentAsk)} current ask</strong> · ${price(x.executionPrice)} average execution`:`Maker price: <strong>${price(x.executionPrice)} limit (1¢ below)</strong>`;
+    return `<strong>${label}</strong><br>${priceLine}<br>Contracts: <strong>${volume(x.contracts)}</strong><br>Kalshi spent: ${money(x.positionCost)} + ${money(x.fee)} ${x.orderType} fee = <strong>${money(x.cost)}</strong><br>Total outlay: <strong>${money(x.totalOutlay)}</strong><br>Total made: <strong>${money(x.totalMade)}</strong>${x.orderType==='maker'?'<br><em>Assumes the resting limit order fills completely.</em>':''}`};
+  const promoCard=(label,item,bonus=false)=>{if(!item)return '';
+    const wagerMath=bonus?`Bonus-bet return: <strong>${money(item.amount)} at ${h(item.originalAmerican)} = ${money(item.sportsbookReturn)}</strong>`:`Boosted odds: <strong>${h(item.originalAmerican)} × ${item.boostMultiplier.toFixed(2)} = ${h(item.boostedAmerican)}</strong><br>${money(item.amount)} wager → <strong>${money(item.sportsbookReturn)} total return</strong>`;
+    const math=`${wagerMath}<br><br>${executionMath('Taker — used for filtering and sorting',item.taker)}${item.maker?`<br><br>${executionMath('Maker — comparison only',item.maker)}`:''}`;
+    return `<div class="promo-card"><div class="tag">${label}</div><div class="amount">${money(item.totalMade)}</div><div class="detail">Taker total made · ${h(item.selection)} at ${h(item.venue)}${bonus?' · promo stake not returned':''}</div><div class="promo-math">${math}</div></div>`};
+  const promoHtml=promo?`<div class="promo-summary">${promoCard('Profit boost',promo.boost)}${promoCard('Bonus bet',promo.bonus,true)}</div>`:'';
   return `<article class="result"><div class="result-head"><div><div class="tag">${h(e.market_label)}</div><div class="match">${h(e.away_team)} at ${h(e.home_team)}</div>
     <div class="time">${h(new Date(e.commence_time).toLocaleString())}${e.kalshi_event_ticker?' · '+h(e.kalshi_event_ticker):''}${kalshiLink}</div></div>
     <div class="score"><div class="gap">${pct(c.vig)} vig</div><div class="metrics">sum ${pct(c.implied_probability_sum)} · distance ${pct(c.vig_gap)}</div></div></div>
-    <div class="legs">${legs}</div>${rejected?`<div class="metrics" style="margin-top:9px">Filtered: ${h(c.rejection_reason)}</div>`:''}</article>`;
+    <div class="legs">${legs}</div>${promoHtml}${rejected?`<div class="metrics" style="margin-top:9px">Filtered: ${h(c.rejection_reason)}</div>`:''}</article>`;
 }
 function selectedBookmakers(){
   if(document.querySelector('.bookmaker-all').checked) return '';
@@ -218,24 +315,32 @@ function unlockAnalysis(){
 }
 function lockAnalysis(){
   $('analysisFilters').disabled=true;
+  lastData=null;
   $('results').innerHTML='';
   $('status').textContent='Scope changed. Continue to analysis filters when ready.';
 }
 function renderResults(data){
+  lastData=data;
   const shownMarkets=new Set([...document.querySelectorAll('.filter-market:checked')].map(x=>x.value));
   const showCandidate=c=>shownMarkets.has(c.event.market_key)&&($('filterKalshi').checked||!c.uses_kalshi);
-  const opportunities=data.opportunities.filter(showCandidate), nearMisses=(data.near_misses||[]).filter(showCandidate);
+  const decorate=items=>items.filter(showCandidate).map(candidate=>({candidate,promo:promotionMetrics(candidate)}));
+  const sortRows=rows=>rows.sort((a,b)=>{
+    if(sortMode==='vig')return Number(a.candidate.vig)-Number(b.candidate.vig)||Number(a.candidate.low_probability)-Number(b.candidate.low_probability);
+    const field=sortMode==='profit_boost'?'boost':'bonus',av=a.promo?.[field]?.totalMade??-Infinity,bv=b.promo?.[field]?.totalMade??-Infinity;
+    return bv-av||Number(a.candidate.vig)-Number(b.candidate.vig);
+  });
+  const opportunities=sortRows(decorate(data.opportunities)), nearMisses=sortRows(decorate(data.near_misses||[]));
   const c=data.counts, quota=data.quota||{};
-  $('status').innerHTML=`<div class="summary"><span class="pill">${opportunities.length} close pairs</span><span class="pill">${c.odds_events} sportsbook markets loaded</span><span class="pill">${c.matched_events} Kalshi matches</span>${quota['x-snapshot-cache']==='reused'?'<span class="pill">Market snapshot reused</span>':''}${quota['x-requests-remaining']?`<span class="pill">${h(quota['x-requests-remaining'])} API requests left</span>`:''}</div>`;
-  let html=opportunities.map(c=>renderCandidate(c)).join('');
+  $('status').innerHTML=`<div class="summary"><div class="summary-pills"><span class="pill">${opportunities.length} close pairs</span><span class="pill">${c.odds_events} sportsbook markets loaded</span><span class="pill">${c.matched_events} Kalshi matches</span>${quota['x-snapshot-cache']==='reused'?'<span class="pill">Market snapshot reused</span>':''}${quota['x-requests-remaining']?`<span class="pill">${h(quota['x-requests-remaining'])} API requests left</span>`:''}</div>${sortControl()}</div>`;
+  let html=opportunities.map(row=>renderCandidate(row.candidate,false,row.promo)).join('');
   if(!html) html='<div class="panel">No pairs meet the current filters. Try increasing the maximum vig gap or low-leg probability.</div>';
-  if(nearMisses.length) html+=`<details><summary>Show ${nearMisses.length} closest filtered pairs</summary>${nearMisses.map(c=>renderCandidate(c,true)).join('')}</details>`;
+  if(nearMisses.length) html+=`<details><summary>Show ${nearMisses.length} closest filtered pairs</summary>${nearMisses.map(row=>renderCandidate(row.candidate,true,row.promo)).join('')}</details>`;
   $('results').innerHTML=html;
 }
 async function run(refreshPrices=false, loadScope=false){
   const buttons=[$('continue'),$('find'),$('refresh')]; buttons.forEach(x=>x.disabled=true); $('status').textContent=refreshPrices?'Refreshing current prices…':'Loading market snapshot…'; $('results').innerHTML='';
   const body={sport:$('sport').value,max_vig:Number($('maxVig').value),max_low_probability:Number($('maxLow').value),
-    hours_ahead:Number($('hours').value),regions:$('regions').value,bookmakers:selectedBookmakers(),payout:Number($('payout').value),
+    hours_ahead:Number($('hours').value),regions:$('regions').value,bookmakers:selectedBookmakers(),promotion_amount:Number($('promoAmount').value),
     markets:[...document.querySelectorAll('.scope-market:checked')].map(x=>x.value),
     include_kalshi:loadScope?$('kalshi').checked:$('filterKalshi').checked,require_kalshi:loadScope?false:$('requireKalshi').checked,include_live:$('live').checked,
     near_misses:Number($('nearMisses').value),refresh_prices:refreshPrices||loadScope};
@@ -249,8 +354,15 @@ $('continue').addEventListener('click',()=>run(false,true));
 $('find').addEventListener('click',()=>run(false,false));
 $('refresh').addEventListener('click',()=>run(true,true));
 $('kalshi').addEventListener('change',()=>{if(!$('kalshi').checked)$('requireKalshi').checked=false;lockAnalysis()});
-$('filterKalshi').addEventListener('change',()=>{const enabled=$('filterKalshi').checked;$('requireKalshi').disabled=!enabled;if(!enabled)$('requireKalshi').checked=false});
+$('filterKalshi').addEventListener('change',()=>{const enabled=$('filterKalshi').checked;$('requireKalshi').disabled=!enabled;if(!enabled)$('requireKalshi').checked=false;if(lastData)renderResults(lastData)});
+document.querySelectorAll('.filter-market').forEach(x=>x.addEventListener('change',()=>{if(lastData)renderResults(lastData)}));
+for(const id of ['profitBoost','promoAmount'])$(id).addEventListener('input',()=>{if(lastData)renderResults(lastData)});
+$('status').addEventListener('change',event=>{if(event.target.id==='sortBy'){sortMode=event.target.value;if(lastData)renderResults(lastData)}});
 document.querySelectorAll('.bookmaker,.bookmaker-all').forEach(x=>x.addEventListener('change',()=>{syncBookmakers(x);lockAnalysis()}));
+const bookmakerMenu=$('bookmakerMenu');
+$('bookmakerDone').addEventListener('click',()=>{bookmakerMenu.open=false});
+document.addEventListener('click',event=>{if(bookmakerMenu.open&&!bookmakerMenu.contains(event.target))bookmakerMenu.open=false});
+document.addEventListener('keydown',event=>{if(event.key==='Escape')bookmakerMenu.open=false});
 document.querySelectorAll('.scope-market,#live').forEach(x=>x.addEventListener('change',lockAnalysis));
 function syncSportMarkets(){
   const sport=$('sport').value, nfl=sport==='americanfootball_nfl', tennis=sport.startsWith('tennis_');
@@ -278,8 +390,13 @@ def _config(payload: dict[str, Any]) -> finder.RunConfig:
     max_vig = _number(payload, "max_vig", "5")
     max_low = _number(payload, "max_low_probability", "100")
     hours = _number(payload, "hours_ahead", "168")
-    payout = _number(payload, "payout", "100")
-    if max_vig < 0 or not 0 <= max_low <= 100 or hours <= 0 or payout <= 0:
+    wager_amount = _number(payload, "promotion_amount", "50")
+    if (
+        max_vig < 0
+        or not 0 <= max_low <= 100
+        or hours <= 0
+        or wager_amount <= 0
+    ):
         raise finder.FinderError("Check the numeric filters; one is outside its allowed range")
     use_kalshi = bool(payload.get("include_kalshi", True))
     require_kalshi = bool(payload.get("require_kalshi", False))
@@ -303,7 +420,7 @@ def _config(payload: dict[str, Any]) -> finder.RunConfig:
         kalshi_series=sport.kalshi_series,
         regions=finder.comma_values(str(payload.get("regions", "us,us2"))),
         bookmakers=finder.comma_values(str(payload.get("bookmakers", ""))),
-        payout=payout,
+        payout=wager_amount,
         minimum_profit=Decimal("0"),
         minimum_roi=Decimal("0"),
         start_tolerance=timedelta(minutes=180),
@@ -321,6 +438,7 @@ def _config(payload: dict[str, Any]) -> finder.RunConfig:
         maximum_vig=max_vig / Decimal("100"),
         max_low_probability=(max_low / Decimal("100") if max_low < 100 else None),
         markets=markets,
+        wager_amount=wager_amount,
     )
 
 

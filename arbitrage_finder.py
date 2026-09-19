@@ -1580,6 +1580,7 @@ def evaluate_sportsbook_offer(
             "decimal_odds": decimal_text(offer.decimal_odds),
             "american_odds": american_odds(offer.decimal_odds),
             "stake": decimal_text(stake),
+            "stake_increment": decimal_text(stake_increment),
             "point": decimal_text(offer.point) if offer.point is not None else None,
             "description": offer.description,
             "updated_at": iso_z(offer.updated_at) if offer.updated_at else None,
@@ -1717,6 +1718,22 @@ def evaluate_kalshi_route(
             "fee": decimal_text(total_cost - position_cost),
             "fee_type": route.fee_model.fee_type,
             "fee_multiplier": decimal_text(route.fee_model.multiplier),
+            "maker_fee_rate": "0.0175",
+            "notional": decimal_text(route.notional),
+            "fractional": route.fractional,
+            "balance_precision": decimal_text(balance_precision),
+            "tie_settlement": (
+                decimal_text(route.tie_settlement)
+                if route.tie_settlement is not None
+                else None
+            ),
+            "orderbook_levels": [
+                {
+                    "price": decimal_text(level.price),
+                    "quantity": decimal_text(level.quantity),
+                }
+                for level in route.asks
+            ],
             "levels": [
                 {
                     "price": decimal_text(fill.price),
@@ -1814,6 +1831,7 @@ def build_candidate(
     kalshi_routes: Sequence[KalshiRoute],
     *,
     target_payout: Decimal,
+    wager_amount: Decimal | None = None,
     stake_increment: Decimal,
     balance_precision: Decimal,
     tie_possible: bool,
@@ -1933,7 +1951,7 @@ def build_candidate(
         )
     if not combinations:
         return None
-    return min(
+    best = min(
         combinations,
         key=lambda item: (
             not item.eligible,
@@ -1941,6 +1959,42 @@ def build_candidate(
             item.low_probability,
             not item.uses_kalshi,
         ),
+    )
+    if wager_amount is None:
+        return best
+
+    # In the browser UI the sizing input represents the cash placed on the
+    # sportsbook leg, not an arbitrary gross payout. Size every opposing leg
+    # to that sportsbook leg's gross return. For example, $100 at +900 has a
+    # $1,000 gross return, so a standard $1 Kalshi market needs 1,000
+    # contracts. The lowest-implied-probability sportsbook leg is the natural
+    # promotional wager when both legs happen to be sportsbooks.
+    sportsbook_legs = [
+        leg for leg in best.legs if leg.source_type == "sportsbook"
+    ]
+    if not sportsbook_legs:
+        return best
+    wager_leg = min(
+        sportsbook_legs,
+        key=lambda leg: leg.cost / leg.win_return,
+    )
+    decimal_odds = decimal_value(
+        wager_leg.detail["decimal_odds"], field_name="sportsbook decimal odds"
+    )
+    wager_target_payout = wager_amount * decimal_odds
+    return build_candidate(
+        match,
+        kalshi_routes,
+        target_payout=wager_target_payout,
+        stake_increment=stake_increment,
+        balance_precision=balance_precision,
+        tie_possible=tie_possible,
+        sportsbook_tie_mode=sportsbook_tie_mode,
+        minimum_profit=minimum_profit,
+        minimum_roi=minimum_roi,
+        require_kalshi=require_kalshi,
+        maximum_vig=maximum_vig,
+        max_low_probability=max_low_probability,
     )
 
 
@@ -1968,6 +2022,7 @@ class RunConfig:
     maximum_vig: Decimal | None = Decimal("0.05")
     max_low_probability: Decimal | None = None
     markets: tuple[str, ...] = ("h2h",)
+    wager_amount: Decimal | None = None
 
 
 @dataclass
@@ -2115,7 +2170,8 @@ def run_finder(
         return build_candidate(
             match,
             routes,
-            target_payout=config.payout,
+            target_payout=config.wager_amount or config.payout,
+            wager_amount=config.wager_amount,
             stake_increment=config.sportsbook_stake_increment,
             balance_precision=config.kalshi_balance_precision,
             tie_possible=(
@@ -2402,7 +2458,16 @@ def report_dict(report: RunReport, *, include_rejected: int = 0) -> dict[str, An
         "kalshi_series": report.config.kalshi_series
         if report.config.use_kalshi
         else None,
-        "target_payout": decimal_text(report.config.payout),
+        "target_payout": (
+            decimal_text(report.config.payout)
+            if report.config.wager_amount is None
+            else None
+        ),
+        "wager_amount": (
+            decimal_text(report.config.wager_amount)
+            if report.config.wager_amount is not None
+            else None
+        ),
         "maximum_vig": (
             decimal_text(report.config.maximum_vig)
             if report.config.maximum_vig is not None
