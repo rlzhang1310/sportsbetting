@@ -11,7 +11,7 @@ from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
-import arbitrage_finder as finder
+import tools.arbitrage_finder as finder
 
 
 ODDS_CACHE = finder.OddsResponseCache(ttl_seconds=float("inf"))

@@ -48,6 +48,7 @@ class SportSpec:
     tie_possible: bool = False
     kalshi_spread_series: str | None = None
     kalshi_total_series: str | None = None
+    kalshi_series_aliases: tuple[str, ...] = ()
 
 
 SPORTS: dict[str, SportSpec] = {
@@ -79,8 +80,14 @@ SPORTS: dict[str, SportSpec] = {
         "NHL", "icehockey_nhl", "KXNHLGAME", False,
         "KXNHLSPREAD", "KXNHLTOTAL"
     ),
-    "tennis_atp": SportSpec("ATP Tennis", "tennis_atp", "KXATPMATCH"),
-    "tennis_wta": SportSpec("WTA Tennis", "tennis_wta", "KXWTAMATCH"),
+    "tennis_atp": SportSpec(
+        "ATP Tennis", "tennis_atp", "KXATPMATCH",
+        kalshi_series_aliases=("KXATPCHALLENGERMATCH",),
+    ),
+    "tennis_wta": SportSpec(
+        "WTA Tennis", "tennis_wta", "KXWTAMATCH",
+        kalshi_series_aliases=("KXWTACHALLENGERMATCH",),
+    ),
 }
 
 
@@ -2197,9 +2204,25 @@ def run_finder(
         )
 
     kalshi_client = KalshiApiClient(http, cache=odds_cache)
-    series = kalshi_client.get_series(config.kalshi_series)
+    kalshi_series_tickers = tuple(
+        dict.fromkeys(
+            (config.kalshi_series, *config.sport.kalshi_series_aliases)
+        )
+    )
+    series = kalshi_client.get_series(kalshi_series_tickers[0])
     base_fee = series_fee_model(series)
-    raw_kalshi = kalshi_client.get_open_events(config.kalshi_series)
+    raw_kalshi: list[dict[str, Any]] = []
+    for series_ticker in kalshi_series_tickers:
+        if series_ticker == kalshi_series_tickers[0]:
+            raw_kalshi.extend(kalshi_client.get_open_events(series_ticker))
+            continue
+        try:
+            kalshi_client.get_series(series_ticker)
+            raw_kalshi.extend(kalshi_client.get_open_events(series_ticker))
+        except FinderError as exc:
+            diagnostics.append(
+                f"Could not load Kalshi series {series_ticker}: {exc}"
+            )
     targets = kalshi_client.get_structured_targets(collect_target_ids(raw_kalshi))
     kalshi_events, kalshi_diagnostics = parse_kalshi_events(
         raw_kalshi,
@@ -2935,7 +2958,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv_list)
     if args.ui:
-        from arbitrage_finder_ui import launch_ui
+        from tools.arbitrage_finder_ui import launch_ui
 
         launch_ui(host=args.host, port=args.port, open_browser=not args.no_browser)
         return 0

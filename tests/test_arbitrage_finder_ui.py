@@ -3,7 +3,7 @@
 from decimal import Decimal
 import unittest
 
-import arbitrage_finder_ui as ui
+import tools.arbitrage_finder_ui as ui
 
 
 class UiConfigTests(unittest.TestCase):

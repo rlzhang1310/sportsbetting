@@ -13,7 +13,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
-import arbitrage_finder as finder
+import tools.arbitrage_finder as finder
 
 
 D = Decimal
@@ -691,6 +691,17 @@ class ClientAndSerializationTests(unittest.TestCase):
         self.assertEqual(len(http.calls), 1)
 
     def test_dynamic_tennis_and_preseason_sport_resolution(self) -> None:
+        self.assertEqual(finder.SPORTS["tennis_atp"].kalshi_series, "KXATPMATCH")
+        self.assertEqual(
+            finder.SPORTS["tennis_atp"].kalshi_series_aliases,
+            ("KXATPCHALLENGERMATCH",),
+        )
+        self.assertEqual(finder.SPORTS["tennis_wta"].kalshi_series, "KXWTAMATCH")
+        self.assertEqual(
+            finder.SPORTS["tennis_wta"].kalshi_series_aliases,
+            ("KXWTACHALLENGERMATCH",),
+        )
+
         class MetadataClient:
             @staticmethod
             def get_sports() -> list[dict[str, object]]:

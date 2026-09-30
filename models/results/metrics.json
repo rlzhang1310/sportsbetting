@@ -1,0 +1,68 @@
+{
+  "train_games": 208,
+  "holdout_games": 208,
+  "baseline_home_win_probability": 0.5817307692307693,
+  "selected_logistic_model_by_training_cv": "six_differences",
+  "training_cv": {
+    "six_differences": [
+      {
+        "C": 0.01,
+        "cv_log_loss": 0.6883465835436413
+      },
+      {
+        "C": 0.1,
+        "cv_log_loss": 0.6928506932240237
+      },
+      {
+        "C": 1.0,
+        "cv_log_loss": 0.7031703993792116
+      },
+      {
+        "C": 10.0,
+        "cv_log_loss": 0.7060272689864684
+      }
+    ],
+    "with_interactions": [
+      {
+        "C": 0.01,
+        "cv_log_loss": 0.689024705571193
+      },
+      {
+        "C": 0.1,
+        "cv_log_loss": 0.6975316594424297
+      },
+      {
+        "C": 1.0,
+        "cv_log_loss": 0.7056109499643954
+      },
+      {
+        "C": 10.0,
+        "cv_log_loss": 0.7044693407520043
+      }
+    ]
+  },
+  "best_hyperparameters": {
+    "six_differences": {
+      "C": 0.01,
+      "cv_log_loss": 0.6883465835436413
+    },
+    "with_interactions": {
+      "C": 0.01,
+      "cv_log_loss": 0.689024705571193
+    }
+  },
+  "holdout_metrics": {
+    "constant_baseline": {
+      "log_loss": 0.694000961924034,
+      "brier_score": 0.2503929363905325
+    },
+    "six_differences": {
+      "log_loss": 0.6795520017943534,
+      "brier_score": 0.24332861452062235
+    },
+    "with_interactions": {
+      "log_loss": 0.679771894433432,
+      "brier_score": 0.24343982930727287
+    }
+  }
+}

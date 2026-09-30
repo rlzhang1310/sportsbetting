@@ -1,7 +1,9 @@
 import os
+import re
 import sys
 import time
 import base64
+from pathlib import Path
 import requests
 
 from cryptography.hazmat.primitives import hashes, serialization
@@ -10,6 +12,37 @@ from cryptography.hazmat.primitives.asymmetric import padding
 
 BASE_URL = "https://external-api.kalshi.com"
 API_PREFIX = "/trade-api/v2"
+
+
+def load_env_file(path=None):
+    """Load simple KEY=VALUE entries from a dotenv file.
+
+    Existing environment variables take precedence over values in .env.
+    """
+    env_path = Path(path or Path(__file__).resolve().parent / ".env")
+    if not env_path.is_file():
+        return
+
+    for raw_line in env_path.read_text(encoding="utf-8-sig").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[7:].lstrip()
+        if "=" not in line:
+            continue
+
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        os.environ.setdefault(key, value)
+
+
+load_env_file()
 
 API_KEY_ID = os.environ.get("KALSHI_API_KEY_ID")
 PRIVATE_KEY_PATH = os.environ.get("KALSHI_PRIVATE_KEY_PATH")
